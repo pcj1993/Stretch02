@@ -1,0 +1,175 @@
+---
+title: "Stretch02"
+format: html
+editor: visual
+---
+
+# Stretch 02
+
+## Loading packages
+
+```{r}
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(sf)
+library(purrr)
+```
+
+```{r}
+setwd("/users/patrickjones/desktop/data_science/stretch02")
+```
+
+
+```{r}
+crimes <- read_csv("crimes-reduced.csv",
+                   col_types = cols(Longitude = col_character(), 
+                                    Latitude = col_character()))
+
+names(crimes) <- names(crimes) %>%
+  str_replace("\\s", "_") %>%
+  str_to_lower()
+
+crimes <- crimes %>%
+  filter_at(vars(latitude, longitude), all_vars(!is.na(.))) %>%
+  filter(primary_type == "HOMICIDE")
+
+tenyears <- today() - years(10)
+
+crimes <- crimes %>%
+  mutate(datetime = mdy_hms(date)) %>%
+  filter(datetime >= tenyears)
+
+crimes <- crimes %>%
+st_as_sf(coords = c("longitude", "latitude"), remove = FALSE) %>%
+  st_set_crs(value = 4326)
+
+census <- st_read("geo_export_abf0c95c-5936-400c-9527-5f9ecc03c0a4.shp") %>%
+  st_set_crs(value = 4326) %>%
+  select(geoid10, geometry)
+```
+
+## Part 1: Identifying crimes near transit stations
+
+# 1. 
+
+```{r}
+CTA <- st_read("CTARailLines.shp") %>%
+  st_transform(crs = 4326)
+
+```
+
+# 2. 
+
+```{r}
+ggplot() +
+  geom_sf(data = census) +
+  geom_sf(data = CTA)
+```
+
+# 3.
+```{r}
+stations_filtered <- st_join(CTA, 
+                             census,
+                           join = st_intersects,
+                           left = FALSE)
+```
+
+# 4.
+```{r}
+ggplot() +
+   geom_sf(data = census) +
+  geom_sf(data = stations_filtered)
+ 
+```
+
+# 5
+```{r}
+
+CTA <- st_join(CTA, 
+              crimes,
+              join = st_intersects,
+              )
+
+CTA_buffered <- st_buffer(
+  CTA,
+  crimes,
+  dist = units::set_units(0.25, "mile")
+)
+
+CTA_joined <- st_join(
+  CTA_buffered,
+  CTA,
+  join = st_intersects
+)
+
+```
+# 6
+
+```{r}
+CTA_joined %>%
+  as_tibble() %>%
+  count(LONGNAME.x, sort = TRUE)
+```
+
+## Part 2:
+
+### 1-3
+```{r}
+#' Census Cloro
+#'
+#' @param year numeric variable for desired census year
+#' @param code string variable for desired census code
+#' @param name string variable for human readable name for census code
+#' @param state state FIPS code
+#' @param county county FIPS code
+#'
+#' @return Does not return anything in R
+#' @export Exports .png files to specified directory
+#'
+#' @examples census_cloro(2021, B00002_001E, "housing units", 06, 037)
+census_cloro <- function(year, code, name, state, county){
+  
+  acs_data <- get_acs(geography = "tract",
+        variables = code,
+        year = year,
+        county = county,
+        survey = "acs5",
+        geometry = TRUE,
+        state = state)
+  
+  ggplot(data = acs_data) +
+  geom_sf(aes(fill = estimate)) +
+    scale_fill_gradient(name = name) +
+  theme_void() +
+    labs(title = str_c(name, "in", str_extract(acs_data$NAME, "\\,.*$"), "by census tract", sep = " "))
+  
+  ggsave(filename = name,
+         device = "png",
+         path = "/users/patrickjones/desktop/data_science/stretch02/images")
+}
+
+
+```
+
+### 4
+```{r}
+
+list1 <- list(
+  year = c(2009, 2009, 2009, 2009, 2009),
+  code = c("B00001_001E", "B00002_001E", "B01001_002E", "B01001_026E", "B02001_002E"),
+  name = c("Population", "Housing Units", "Total Male", "Total Female", "Total White Population"),
+  state = c(06, 36, 17, 12, 48),
+  county = c(037, 061, 031, 086, 201)
+)
+
+list2 <- list(
+  c(2009, "B00001_001E", "Population", 06, 037),
+  c(2009, "B00002_001E", "Housing Units", 36, 061),
+  c(2009, "B01001_002E", "Total Male", 17, 031),
+  c(2009, "B01001_026E", "Total Female", 12, 086),
+  c(2009, "B02001_002E", "Total White Population", 48, 201)
+)
+
+pmap(list1, census_cloro)
+```
